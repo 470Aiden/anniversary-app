@@ -7,9 +7,10 @@ interface SettingsModalProps {
   isOpen: boolean
   onClose: () => void
   onColorChange: (primary: string, secondary: string) => void
+  onPublish?: () => void
 }
 
-export default function SettingsModal({ isOpen, onClose, onColorChange }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, onColorChange, onPublish }: SettingsModalProps) {
   const [primaryHue, setPrimaryHue] = useState(340)
   const [secondaryHue, setSecondaryHue] = useState(25)
 
@@ -30,6 +31,60 @@ export default function SettingsModal({ isOpen, onClose, onColorChange }: Settin
   }
 
   if (!isOpen) return null
+
+  const [versions, setVersions] = useState<Array<{file:string,path:string,ts:number}>>([])
+  const [loadingVersions, setLoadingVersions] = useState(false)
+
+  const fetchVersions = async () => {
+    setLoadingVersions(true)
+    try {
+      const res = await fetch('/api/publish/versions')
+      const data = await res.json()
+      setVersions(data.versions || [])
+    } catch (e) {
+      console.error('Failed to load versions', e)
+    } finally {
+      setLoadingVersions(false)
+    }
+  }
+
+  const handleUnpublish = async () => {
+    try {
+      await fetch('/api/publish/unpublish', { method: 'POST' })
+      // clear published state in client localStorage
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('published_photos')
+        localStorage.removeItem('published_queue')
+        localStorage.removeItem('published_uploaded_tracks')
+        localStorage.setItem('site_mode', 'dev')
+      }
+      onClose()
+    } catch (e) {
+      console.error('Unpublish failed', e)
+    }
+  }
+
+  const handleRestore = async (file: string) => {
+    try {
+      const res = await fetch('/api/publish/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file }),
+      })
+      const data = await res.json()
+      if (data.published) {
+        // update client-side published snapshot
+        localStorage.setItem('published_photos', JSON.stringify(data.published.photos || []))
+        localStorage.setItem('published_queue', JSON.stringify(data.published.queue || []))
+        localStorage.setItem('published_uploaded_tracks', JSON.stringify(data.published.uploadedTracks || []))
+        localStorage.setItem('site_mode', 'published')
+        onClose()
+        window.location.reload()
+      }
+    } catch (e) {
+      console.error('Restore failed', e)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -130,6 +185,48 @@ export default function SettingsModal({ isOpen, onClose, onColorChange }: Settin
             <li>• Write love letters in the Love Letters tab</li>
           </ul>
         </div>
+
+        <div className="mt-6 flex justify-end">
+          {onPublish && (
+            <button
+              onClick={onPublish}
+              className="bg-romantic-600 text-white px-4 py-2 rounded-full mr-3"
+            >
+              Publish Site
+            </button>
+          )}
+          <button
+            onClick={() => {
+              fetchVersions()
+            }}
+            className="bg-white/10 text-white px-4 py-2 rounded-full mr-3"
+          >
+            Versions
+          </button>
+          <button
+            onClick={handleUnpublish}
+            className="bg-red-600 text-white px-4 py-2 rounded-full"
+          >
+            Unpublish
+          </button>
+        </div>
+        {/* Versions list */}
+        {versions && versions.length > 0 && (
+          <div className="mt-4">
+            <h4 className="text-white font-semibold mb-2">Published Versions</h4>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {versions.map((v) => (
+                <div key={v.file} className="flex items-center justify-between bg-white/5 p-2 rounded">
+                  <div className="text-sm text-white/70">{new Date(v.ts).toLocaleString()}</div>
+                  <div className="flex gap-2">
+                    <a href={v.path} target="_blank" rel="noreferrer" className="text-xs text-white/60">View</a>
+                    <button onClick={() => handleRestore(v.file)} className="text-xs text-white/80">Restore</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

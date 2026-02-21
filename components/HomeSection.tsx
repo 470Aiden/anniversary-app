@@ -20,7 +20,8 @@ export default function HomeSection() {
             Loving You
           </h1>
           <p className="font-body text-xl md:text-2xl text-white/90 max-w-2xl mx-auto mb-12 leading-relaxed">
-            A message for your love
+            Here's to being the ts to your pmo forever and ever
+            💗
           </p>
         </motion.div>
 

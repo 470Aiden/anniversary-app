@@ -33,6 +33,8 @@ export default function MusicPlayer({ initialQueue = [] }: MusicPlayerProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [playError, setPlayError] = useState<string | null>(null)
+  const [uploadedTracks, setUploadedTracks] = useState<Song[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const currentSong = queue[currentSongIndex]
 
@@ -41,6 +43,62 @@ export default function MusicPlayer({ initialQueue = [] }: MusicPlayerProps) {
       audioRef.current.volume = volume
     }
   }, [volume])
+
+  // Persist queue to draft_queue so page can publish it later
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem('draft_queue', JSON.stringify(queue))
+    } catch (e) {
+      console.error('Failed to persist draft queue', e)
+    }
+  }, [queue])
+
+  // Load uploaded tracks from localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    // If no initialQueue provided, try to load draft queue saved from previous edits
+    try {
+      if (initialQueue.length === 0) {
+        const dq = localStorage.getItem('draft_queue')
+        if (dq) {
+          const parsedQueue: Song[] = JSON.parse(dq)
+          if (parsedQueue && parsedQueue.length > 0) {
+            setQueue(parsedQueue)
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load draft queue', e)
+    }
+    try {
+      const stored = localStorage.getItem('uploaded_tracks')
+      if (stored) {
+        const parsed: Song[] = JSON.parse(stored)
+        if (parsed && parsed.length > 0) {
+          setUploadedTracks(parsed)
+          // merge into queue if not present
+          setQueue((prev) => {
+            const ids = new Set(prev.map((s) => s.id))
+            const toAdd = parsed.filter((s) => !ids.has(s.id))
+            return [...prev, ...toAdd]
+          })
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load uploaded tracks', e)
+    }
+  }, [])
+
+  // Persist uploaded tracks
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem('uploaded_tracks', JSON.stringify(uploadedTracks))
+    } catch (e) {
+      console.error('Failed to persist uploaded tracks', e)
+    }
+  }, [uploadedTracks])
 
   // When current song changes, update audio source and play if already playing
   useEffect(() => {
@@ -141,6 +199,31 @@ export default function MusicPlayer({ initialQueue = [] }: MusicPlayerProps) {
     } catch (err) {
       console.error('Failed to search', err)
     }
+  }
+
+  const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement> | null) => {
+    const files = e?.target?.files
+    if (!files || files.length === 0) return
+
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const result = ev.target?.result
+        if (typeof result === 'string') {
+          const song: Song = {
+            id: Date.now().toString() + Math.random(),
+            title: file.name.replace(/\.[^/.]+$/, ''),
+            artist: 'Local Upload',
+            previewUrl: result,
+          }
+          setUploadedTracks((prev) => [...prev, song])
+          setQueue((prev) => [...prev, song])
+        }
+      }
+      reader.readAsDataURL(file)
+    })
+    // clear the input value so same file can be uploaded again if needed
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const addTrackToQueue = (t: any, playNow = false) => {
@@ -301,6 +384,25 @@ export default function MusicPlayer({ initialQueue = [] }: MusicPlayerProps) {
               />
               <button type="submit" className="px-3 py-2 bg-white text-romantic-600 rounded-md">Search</button>
             </form>
+            {/* Upload local audio files (MP3) */}
+            <div className="mb-3 flex gap-2 items-center">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*"
+                multiple
+                onChange={(e) => handleAudioUpload(e)}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3 py-2 bg-white text-romantic-600 rounded-md"
+                type="button"
+              >
+                Upload MP3
+              </button>
+              <span className="text-xs text-white/60">You can upload local MP3s to add playable tracks.</span>
+            </div>
             <div className="space-y-2 max-h-40 overflow-y-auto mb-2">
               {searchResults.map((r) => (
                 <div key={r.id} className="flex items-center justify-between">
@@ -324,31 +426,73 @@ export default function MusicPlayer({ initialQueue = [] }: MusicPlayerProps) {
                 </div>
               ))}
             </div>
+            {/* Uploaded local tracks */}
+            {uploadedTracks.length > 0 && (
+              <div className="mb-2">
+                <p className="text-white/60 text-xs mb-1">Local Uploads</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {uploadedTracks.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between">
+                      <div className="text-sm text-white/70 truncate">{t.title} • {t.artist}</div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => addTrackToQueue(t, false)}
+                          className="text-white/70 hover:text-white text-xs"
+                        >
+                          Add
+                        </button>
+                        <button
+                          onClick={() => addTrackToQueue(t, true)}
+                          className="text-white/70 hover:text-white text-xs"
+                        >
+                          Play
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="space-y-1 max-h-32 overflow-y-auto">
-              {queue.map((song, idx) => (
-                <button
-                  key={song.id}
-                  onClick={() => {
-                    setCurrentSongIndex(idx)
-                    setCurrentTime(0)
-                    // If the song has a preview URL, load and play it immediately
-                    if (audioRef.current) {
-                      if (song.previewUrl) {
-                        audioRef.current.src = song.previewUrl
-                        audioRef.current.load()
-                        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false))
-                      } else {
-                        // No preview available
-                        setPlayError('No playable preview for this track')
-                        setIsPlaying(false)
-                      }
-                    }
-                  }}
-                  className={`w-full text-left text-sm truncate ${idx === currentSongIndex ? 'text-white' : 'text-white/70'}`}
-                >
-                  {song.title} • {song.artist}
-                </button>
-              ))}
+              {queue.map((song, idx) => {
+                const isCurrent = idx === currentSongIndex
+                const hasPreview = Boolean(song.previewUrl)
+                return (
+                  <div key={song.id} className="flex items-center justify-between">
+                    <button
+                      onClick={() => {
+                        setCurrentSongIndex(idx)
+                        setCurrentTime(0)
+                        setPlayError(null)
+                        // If the song has a preview URL, load and play it immediately
+                        if (audioRef.current) {
+                          if (song.previewUrl) {
+                            audioRef.current.src = song.previewUrl
+                            audioRef.current.load()
+                            audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false))
+                          } else {
+                            // No preview available
+                            setPlayError('No playable preview for this track')
+                            setIsPlaying(false)
+                          }
+                        }
+                      }}
+                      className={`w-full text-left text-sm truncate ${isCurrent ? 'text-white' : 'text-white/70'} ${!hasPreview ? 'opacity-60 cursor-default' : ''}`}
+                      disabled={!hasPreview}
+                      aria-disabled={!hasPreview}
+                    >
+                      {song.title} • {song.artist}
+                    </button>
+                    <div className="ml-2 text-xs">
+                      {hasPreview ? (
+                        <span className="px-2 py-0.5 bg-white/10 rounded text-white/80">Preview</span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-white/10 rounded text-red-300">No preview</span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
