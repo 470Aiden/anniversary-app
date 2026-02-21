@@ -11,7 +11,7 @@ interface NavigationProps {
   onModeToggle?: () => void
 }
 
-export default function Navigation({ currentTab, onTabChange, onSettingsClick }: NavigationProps) {
+export default function Navigation({ currentTab, onTabChange, onSettingsClick, mode, onModeToggle }: NavigationProps) {
   const tabs = [
     { id: 'home', label: 'Home' },
     { id: 'timeline', label: 'Our Timeline' },
